@@ -18,6 +18,8 @@ FAIL=0
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+SPLIT_LINES=5000
+CHUNK="chunk"
 
 start=$SECONDS
 
@@ -28,10 +30,34 @@ chunksize=$((lines/THREADS + 4))
 
 split -a2 -l $chunksize $CSV_FILE mysplit
 
+
+i=1
 for file in `find -name "mysplit*"`
 do
   realfile=`readlink -f $file`
-  mysql -h$MYSQL_HOST -u$MYSQL_USER -p$MYSQL_PWD -P$MYSQL_PORT $MYSQL_DB -A -e "LOAD DATA INFILE '$realfile' INTO TABLE $MYSQL_TABLE" &
+  tmpfile=$CHUNK$i
+  i=$((i+1))
+  pt-fifo-split --force $realfile --fifo $tmpfile --lines=$SPLIT_LINES &
+done
+
+sleep 1;
+
+
+myload() {
+  i=$1
+  file=$CHUNK$i
+  realfile=`readlink -f $file`
+  while [ -e $realfile ]; do
+    mysql -h$MYSQL_HOST -u$MYSQL_USER -p$MYSQL_PWD -P$MYSQL_PORT $MYSQL_DB -A -e "LOAD DATA INFILE '$realfile' INTO TABLE $MYSQL_TABLE"
+  done
+}
+
+
+i=1
+for file in `find -name "mysplit*"`
+do
+  myload $i &
+  i=$((i+1))
 done
 
 for job in `jobs -p`
